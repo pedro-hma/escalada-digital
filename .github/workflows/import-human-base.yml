@@ -1,0 +1,55 @@
+name: Import human base
+
+on:
+  push:
+    paths:
+      - '.github/workflows/import-human-base.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  import:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - name: Download CC0 rigged human and inspect GLB
+        run: |
+          mkdir -p public/models docs
+          curl -L --fail --retry 3 -o public/models/human.glb https://raw.githubusercontent.com/UMRAM-Bilkent/supine-human-model/main/assets/human.glb
+          python - <<'PY'
+          import json, struct
+          from pathlib import Path
+          p=Path('public/models/human.glb')
+          data=p.read_bytes()
+          magic,version,total=struct.unpack_from('<III',data,0)
+          assert magic==0x46546C67 and version==2
+          off=12
+          meta={}
+          while off < len(data):
+              ln,typ=struct.unpack_from('<II',data,off); off+=8
+              chunk=data[off:off+ln]; off+=ln
+              if typ==0x4E4F534A:
+                  meta=json.loads(chunk.decode('utf-8').rstrip('\x00 \t\r\n'))
+                  break
+          out={
+            'asset':meta.get('asset'),
+            'scene':meta.get('scene'),
+            'materials':[m.get('name','') for m in meta.get('materials',[])],
+            'meshes':[m.get('name','') for m in meta.get('meshes',[])],
+            'nodes':[n.get('name','') for n in meta.get('nodes',[])],
+            'animations':[a.get('name','') for a in meta.get('animations',[])],
+            'skins':[s.get('name','') for s in meta.get('skins',[])],
+          }
+          Path('docs/human-model-metadata.json').write_text(json.dumps(out,indent=2,ensure_ascii=False))
+          print(json.dumps(out,indent=2,ensure_ascii=False))
+          PY
+      - name: Commit model and metadata
+        run: |
+          git config user.name "escalada-digital-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add public/models/human.glb docs/human-model-metadata.json
+          git commit -m "feat: import CC0 rigged human base"
+          git push origin main
