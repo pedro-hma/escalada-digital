@@ -17,6 +17,8 @@ jobs:
           ref: main
       - name: Apply Run 7 art pass
         run: python scripts/apply_run7.py
+      - name: Remove duplicated preview from patch
+        run: python scripts/fix_run7_duplicates.py
       - name: Validate production build
         run: |
           npm install
