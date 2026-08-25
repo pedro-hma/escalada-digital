@@ -1,0 +1,44 @@
+name: Import Kenney human candidate
+
+on:
+  push:
+    paths:
+      - '.github/workflows/import-kenney-human.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  import:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - name: Download and inspect CC0 Kenney Animated Characters 3
+        run: |
+          mkdir -p .tmp/kenney docs public/models/kenney
+          curl -L --fail --retry 3 -o .tmp/kenney.zip https://opengameart.org/sites/default/files/kenney_animated-characters-3.zip
+          unzip -l .tmp/kenney.zip | tee docs/kenney-archive.txt
+          unzip -q .tmp/kenney.zip -d .tmp/kenney
+          find .tmp/kenney -maxdepth 5 -type f | sort | tee docs/kenney-files.txt
+          python - <<'PY'
+          from pathlib import Path
+          import shutil
+          src=Path('.tmp/kenney')
+          out=Path('public/models/kenney')
+          allowed={'.gltf','.glb','.bin','.png','.jpg','.jpeg'}
+          for f in src.rglob('*'):
+              if f.is_file() and f.suffix.lower() in allowed:
+                  rel=f.relative_to(src)
+                  target=out/rel
+                  target.parent.mkdir(parents=True,exist_ok=True)
+                  shutil.copy2(f,target)
+          PY
+      - name: Commit candidate assets
+        run: |
+          git config user.name "escalada-digital-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add docs/kenney-archive.txt docs/kenney-files.txt public/models/kenney
+          git commit -m "chore: import Kenney CC0 human candidate"
+          git push origin main
