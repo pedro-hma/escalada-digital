@@ -1,7 +1,8 @@
-import { Canvas, useFrame, useThree } from '@react-three/fiber';
-import { Html, OrbitControls } from '@react-three/drei';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Canvas, createPortal, useFrame, useThree } from '@react-three/fiber';
+import { Html, OrbitControls, useGLTF } from '@react-three/drei';
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import * as THREE from 'three';
+import { clone as cloneSkeleton } from 'three/examples/jsm/utils/SkeletonUtils.js';
 
 type MoveState = 'IDLE' | 'WALK' | 'RUN';
 type Role = 'ESTAGIÁRIO' | 'JÚNIOR' | 'PLENO' | 'SÊNIOR' | 'CEO';
@@ -147,133 +148,193 @@ function canUseCosmetic(item: Cosmetic, game: GameState, debugPremium = false) {
   return !item.premium || debugPremium || game.subscriptionTier === 'premium' || game.ownedCosmetics.includes(item.id);
 }
 
-function Character3D({ avatar, state = 'IDLE', scale = 1 }: { avatar: Avatar; state?: MoveState; scale?: number }) {
-  const root = useRef<THREE.Group>(null);
-  const torso = useRef<THREE.Group>(null);
-  const head = useRef<THREE.Group>(null);
-  const armL = useRef<THREE.Group>(null); const armR = useRef<THREE.Group>(null);
-  const forearmL = useRef<THREE.Group>(null); const forearmR = useRef<THREE.Group>(null);
-  const legL = useRef<THREE.Group>(null); const legR = useRef<THREE.Group>(null);
-  const calfL = useRef<THREE.Group>(null); const calfR = useRef<THREE.Group>(null);
+function classifyRigBone(name: string) {
+  const n = name.toLowerCase();
+  if (n.includes('foot') || n.includes('toe')) return 3; // shoes
+  if (n.includes('upleg') || (n.includes('leg') && !n.includes('fore')) || n === 'hips') return 2; // pants
+  if (n.includes('spine') || n.includes('shoulder') || n.includes('forearm') || (n.includes('arm') && !n.includes('armature'))) return 1; // top
+  return 0; // exposed skin / head / hands
+}
 
-  const broad = avatar.bodyType === 'broad' ? 1.1 : avatar.bodyType === 'slim' ? .9 : 1;
-  const shoulder = .43 * broad;
-  const waist = avatar.bodyType === 'broad' ? .34 : avatar.bodyType === 'slim' ? .27 : .3;
-  const hip = avatar.bodyType === 'broad' ? .36 : avatar.bodyType === 'slim' ? .3 : .33;
-  const faceX = avatar.faceShape === 'angular' ? .93 : avatar.faceShape === 'soft' ? 1.04 : .98;
-  const faceY = avatar.faceShape === 'oval' ? 1.08 : avatar.faceShape === 'soft' ? .99 : 1.03;
-  const premiumGlow = ['techwear-neon','cyber-hoodie','night-deploy','golden-ceo'].includes(avatar.top);
+function prepareAvatarMesh(root: THREE.Object3D) {
+  root.traverse((obj) => {
+    const mesh = obj as THREE.SkinnedMesh;
+    if (!mesh.isSkinnedMesh || !mesh.geometry) return;
 
-  useFrame(({ clock }) => {
-    const t = clock.elapsedTime;
-    const moving = state !== 'IDLE';
-    const run = state === 'RUN';
-    const freq = run ? 9.5 : 6.2;
-    const amp = run ? .72 : .42;
-    const swing = moving ? Math.sin(t * freq) * amp : Math.sin(t * 1.25) * .018;
-    if (armL.current) armL.current.rotation.x = swing;
-    if (armR.current) armR.current.rotation.x = -swing;
-    if (forearmL.current) forearmL.current.rotation.x = moving ? Math.max(0, -swing) * .28 : -.05;
-    if (forearmR.current) forearmR.current.rotation.x = moving ? Math.max(0, swing) * .28 : -.05;
-    if (legL.current) legL.current.rotation.x = -swing * .88;
-    if (legR.current) legR.current.rotation.x = swing * .88;
-    if (calfL.current) calfL.current.rotation.x = moving ? Math.max(0, swing) * .45 : 0;
-    if (calfR.current) calfR.current.rotation.x = moving ? Math.max(0, -swing) * .45 : 0;
-    if (torso.current) {
-      torso.current.position.y = 1.48 + Math.sin(t * 1.55) * .012;
-      torso.current.rotation.z = moving ? Math.sin(t * freq) * .012 : Math.sin(t * .55) * .007;
-      torso.current.rotation.y = moving ? Math.sin(t * freq) * .018 : 0;
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    const geometry = mesh.geometry.clone();
+    mesh.geometry = geometry;
+
+    const skinIndex = geometry.getAttribute('skinIndex') as THREE.BufferAttribute | undefined;
+    const skinWeight = geometry.getAttribute('skinWeight') as THREE.BufferAttribute | undefined;
+    if (!skinIndex || !skinWeight || !mesh.skeleton) return;
+
+    const sourceIndex = geometry.index
+      ? Array.from(geometry.index.array as ArrayLike<number>)
+      : Array.from({ length: geometry.getAttribute('position').count }, (_, i) => i);
+
+    const buckets: number[][] = [[], [], [], []];
+    const get4 = (a: THREE.BufferAttribute, i: number) => [a.getX(i), a.getY(i), a.getZ(i), a.getW(i)];
+
+    for (let t = 0; t < sourceIndex.length; t += 3) {
+      const score = [0, 0, 0, 0];
+      for (let k = 0; k < 3; k++) {
+        const vi = sourceIndex[t + k];
+        const ids = get4(skinIndex, vi);
+        const weights = get4(skinWeight, vi);
+        for (let j = 0; j < 4; j++) {
+          const bone = mesh.skeleton.bones[Math.round(ids[j])];
+          if (!bone) continue;
+          score[classifyRigBone(bone.name)] += weights[j];
+        }
+      }
+      let category = 0;
+      for (let i = 1; i < 4; i++) if (score[i] > score[category]) category = i;
+      buckets[category].push(sourceIndex[t], sourceIndex[t + 1], sourceIndex[t + 2]);
     }
-    if (head.current) {
-      head.current.rotation.y = moving ? -Math.sin(t * freq) * .018 : Math.sin(t * .42) * .055;
-      head.current.rotation.x = Math.sin(t * .5) * .012;
-    }
-    if (root.current) root.current.position.y = moving ? Math.abs(Math.sin(t * freq)) * .012 : 0;
+
+    const reordered = buckets.flat();
+    geometry.setIndex(reordered);
+    geometry.clearGroups();
+    let cursor = 0;
+    buckets.forEach((indices, materialIndex) => {
+      if (indices.length) geometry.addGroup(cursor, indices.length, materialIndex);
+      cursor += indices.length;
+    });
+
+    const sourceMaterial = Array.isArray(mesh.material) ? mesh.material[0] : mesh.material;
+    const sourceMap = sourceMaterial instanceof THREE.MeshStandardMaterial ? sourceMaterial.map : null;
+    const materials = [
+      new THREE.MeshStandardMaterial({ color: '#ffffff', map: sourceMap, roughness: .72, metalness: 0 }),
+      new THREE.MeshStandardMaterial({ color: '#b91c1c', roughness: .86, metalness: 0 }),
+      new THREE.MeshStandardMaterial({ color: '#142b4e', roughness: .9, metalness: 0 }),
+      new THREE.MeshStandardMaterial({ color: '#f3f4f6', roughness: .62, metalness: 0 }),
+    ];
+    mesh.material = materials;
+    mesh.userData.avatarMaterials = materials;
   });
+  return root;
+}
 
-  return <group ref={root} scale={scale}>
-    <group position={[0,1.02,0]}>
-      <mesh castShadow scale={[hip,.23,.22]}><sphereGeometry args={[1,28,20]}/><meshStandardMaterial color={avatar.bottomColor} roughness={.86}/></mesh>
-      <mesh position={[0,.28,0]} scale={[waist,.34,.21]} castShadow><sphereGeometry args={[1,28,20]}/><meshStandardMaterial color={avatar.topColor} roughness={.82}/></mesh>
-    </group>
-
-    <group ref={torso} position={[0,1.48,0]}>
-      <mesh scale={[shoulder,.43,.25]} castShadow>
-        <sphereGeometry args={[1,32,24]}/>
-        <meshStandardMaterial color={avatar.topColor} roughness={.78} emissive={premiumGlow ? avatar.topColor : '#000000'} emissiveIntensity={premiumGlow ? .16 : 0}/>
+function HeadStyle({ avatar }: { avatar: Avatar }) {
+  const longHair = avatar.hairStyle === 'longo';
+  const curls = avatar.hairStyle === 'cacheado';
+  const bun = avatar.hairStyle === 'coque';
+  const shaved = avatar.hairStyle === 'raspado';
+  return <group>
+    <mesh position={[0,.23,-.025]} scale={[1,.86,1]} castShadow>
+      <sphereGeometry args={[.31,28,20,0,Math.PI*2,0,Math.PI/2]}/>
+      <meshStandardMaterial color={avatar.hair} roughness={.8}/>
+    </mesh>
+    {!shaved && !curls && <>
+      <mesh position={[-.10,.38,.05]} rotation={[0,0,-.35]} scale={[.9,.6,.75]} castShadow>
+        <capsuleGeometry args={[.085,.20,6,14]}/><meshStandardMaterial color={avatar.hair} roughness={.78}/>
       </mesh>
-      <mesh position={[0,-.22,0]} scale={[waist*1.03,.28,.205]} castShadow><sphereGeometry args={[1,28,20]}/><meshStandardMaterial color={avatar.topColor} roughness={.8}/></mesh>
-      <mesh position={[0,.05,.245]} scale={[shoulder*.68,.28,.035]}><sphereGeometry args={[1,20,14]}/><meshStandardMaterial color={avatar.topColor} roughness={.72}/></mesh>
-      {avatar.top === 'bomber' && <mesh position={[0,.02,-.08]} scale={[shoulder*1.07,.44,.29]}><sphereGeometry args={[1,24,18]}/><meshStandardMaterial color={avatar.topColor} roughness={.7}/></mesh>}
-      {avatar.top === 'golden-ceo' && <mesh position={[0,.1,.275]} scale={[.22,.035,.025]}><sphereGeometry args={[1,14,10]}/><meshStandardMaterial color="#fbbf24" metalness={.35} roughness={.45}/></mesh>}
-      <mesh position={[0,.47,0]} castShadow><cylinderGeometry args={[.105,.12,.22,20]}/><meshStandardMaterial color={avatar.skin} roughness={.82}/></mesh>
+      <mesh position={[.04,.40,.08]} rotation={[0,0,.16]} scale={[1,.65,.78]} castShadow>
+        <capsuleGeometry args={[.09,.23,6,14]}/><meshStandardMaterial color={avatar.hair} roughness={.78}/>
+      </mesh>
+      <mesh position={[.16,.34,.04]} rotation={[0,0,.52]} scale={[.82,.58,.7]} castShadow>
+        <capsuleGeometry args={[.075,.16,6,14]}/><meshStandardMaterial color={avatar.hair} roughness={.78}/>
+      </mesh>
+    </>}
+    {curls && [-.2,-.1,0,.1,.2].map((x,i)=><mesh key={i} position={[x,.32-Math.abs(x)*.18,.02]} scale={[.085,.085,.075]} castShadow><sphereGeometry args={[1,16,12]}/><meshStandardMaterial color={avatar.hair} roughness={.9}/></mesh>)}
+    {longHair && <mesh position={[0,-.03,-.24]} scale={[.25,.44,.11]} castShadow><capsuleGeometry args={[1,1,8,18]}/><meshStandardMaterial color={avatar.hair} roughness={.86}/></mesh>}
+    {bun && <mesh position={[0,.46,-.06]} castShadow><sphereGeometry args={[.13,18,14]}/><meshStandardMaterial color={avatar.hair} roughness={.86}/></mesh>}
 
-      <group ref={head} position={[0,.78,0]}>
-        <mesh castShadow scale={[.275*faceX,.34*faceY,.275]}><sphereGeometry args={[1,36,28]}/><meshStandardMaterial color={avatar.skin} roughness={.82}/></mesh>
-        <mesh position={[0,-.17,.025]} castShadow scale={[.225*faceX,.19,.235]}><sphereGeometry args={[1,32,22]}/><meshStandardMaterial color={avatar.skin} roughness={.82}/></mesh>
-        {[-1,1].map(sg=><mesh key={`cheek-${sg}`} position={[sg*.13,-.06,.19]} scale={[.11,.11,.07]}><sphereGeometry args={[1,20,14]}/><meshStandardMaterial color={avatar.skin} roughness={.82}/></mesh>)}
-        {[-1,1].map(sg=><mesh key={`ear-${sg}`} position={[sg*.278*faceX,-.02,0]} scale={[.045,.075,.025]}><sphereGeometry args={[1,18,12]}/><meshStandardMaterial color={avatar.skin} roughness={.82}/></mesh>)}
-        <mesh position={[0,.005,.268]} rotation={[Math.PI/2,0,0]} scale={[1,.9,1]}><coneGeometry args={[.035,.11,14]}/><meshStandardMaterial color={avatar.skin} roughness={.82}/></mesh>
-        <mesh position={[0,-.047,.29]} scale={[.042,.034,.04]}><sphereGeometry args={[1,18,12]}/><meshStandardMaterial color={avatar.skin} roughness={.82}/></mesh>
-        {[-1,1].map(sg=><group key={`eye-${sg}`} position={[sg*.092,.062,.254]}>
-          <mesh scale={[.062,.032,.022]}><sphereGeometry args={[1,20,14]}/><meshStandardMaterial color="#f7f7f2" roughness={.5}/></mesh>
-          <mesh position={[0,0,.024]} scale={[.025,.025,.012]}><sphereGeometry args={[1,18,12]}/><meshStandardMaterial color={avatar.eyeColor} roughness={.4}/></mesh>
-          <mesh position={[0,0,.036]} scale={[.011,.011,.008]}><sphereGeometry args={[1,14,10]}/><meshStandardMaterial color="#111111"/></mesh>
-          <mesh position={[0,.068,.01]} rotation={[0,0,sg*.05]} scale={[.072,.012,.012]}><sphereGeometry args={[1,14,8]}/><meshStandardMaterial color={avatar.hair}/></mesh>
-        </group>)}
-        <mesh position={[0,-.135,.263]} scale={[.075,.014,.016]}><sphereGeometry args={[1,20,10]}/><meshStandardMaterial color="#8b5149" roughness={.75}/></mesh>
-        <mesh position={[0,-.158,.257]} scale={[.058,.009,.014]}><sphereGeometry args={[1,18,10]}/><meshStandardMaterial color="#6f3f3a" roughness={.8}/></mesh>
-        {avatar.hairStyle !== 'raspado' && <mesh position={[0,.115,-.01]} scale={[.29*faceX,.235,.29]}><sphereGeometry args={[1,30,22,0,Math.PI*2,0,Math.PI/2]}/><meshStandardMaterial color={avatar.hair} roughness={.92}/></mesh>}
-        {avatar.hairStyle === 'raspado' && <mesh position={[0,.105,-.01]} scale={[.282*faceX,.22,.282]}><sphereGeometry args={[1,26,18,0,Math.PI*2,0,Math.PI/2]}/><meshStandardMaterial color={avatar.hair} roughness={1}/></mesh>}
-        {avatar.hairStyle === 'longo' && <mesh position={[0,-.02,-.20]} scale={[.26,.38,.10]}><capsuleGeometry args={[.25,.35,10,20]}/><meshStandardMaterial color={avatar.hair} roughness={.9}/></mesh>}
-        {avatar.hairStyle === 'coque' && <mesh position={[0,.34,-.07]} scale={[.13,.13,.13]}><sphereGeometry args={[1,22,16]}/><meshStandardMaterial color={avatar.hair}/></mesh>}
-        {avatar.hairStyle === 'cacheado' && [-.18,-.09,0,.09,.18].map((x,i)=><mesh key={`curl-${i}`} position={[x,.22-(Math.abs(x)*.2),-.04]} scale={[.075,.075,.075]}><sphereGeometry args={[1,16,12]}/><meshStandardMaterial color={avatar.hair}/></mesh>)}
-        {avatar.accessory === 'oculos' && [-1,1].map(sg=><mesh key={`glass-${sg}`} position={[sg*.095,.06,.29]} scale={[1,.72,1]}><torusGeometry args={[.064,.009,10,24]}/><meshStandardMaterial color="#171717" metalness={.15}/></mesh>)}
-        {avatar.accessory === 'headset' && <mesh position={[0,.10,0]} rotation={[Math.PI/2,0,0]}><torusGeometry args={[.31,.021,10,28,Math.PI]}/><meshStandardMaterial color="#171717"/></mesh>}
-      </group>
-
-      {[-1,1].map(sg=>{
-        const upperRef = sg<0 ? armR : armL; const lowerRef = sg<0 ? forearmR : forearmL;
-        return <group key={`arm-${sg}`} ref={upperRef} position={[sg*(shoulder+.06),.22,0]} rotation={[0,0,sg*.08]}>
-          <mesh position={[0,-.24,0]} scale={[.095,.29,.10]} castShadow><capsuleGeometry args={[.085,.28,10,20]}/><meshStandardMaterial color={avatar.topColor} roughness={.8}/></mesh>
-          <mesh position={[0,-.49,0]} scale={[.105,.105,.105]}><sphereGeometry args={[1,18,14]}/><meshStandardMaterial color={avatar.skin} roughness={.82}/></mesh>
-          <group ref={lowerRef} position={[0,-.49,0]}>
-            <mesh position={[0,-.23,0]} scale={[.075,.24,.078]} castShadow><capsuleGeometry args={[.075,.24,10,20]}/><meshStandardMaterial color={avatar.skin} roughness={.82}/></mesh>
-            <mesh position={[0,-.47,.015]} scale={[.075,.11,.055]} castShadow><sphereGeometry args={[1,22,16]}/><meshStandardMaterial color={avatar.skin} roughness={.82}/></mesh>
-          </group>
-        </group>;
-      })}
-    </group>
-
-    {[-1,1].map(sg=>{
-      const upperRef = sg<0 ? legR : legL; const lowerRef = sg<0 ? calfR : calfL;
-      return <group key={`leg-${sg}`} ref={upperRef} position={[sg*.17,.94,0]}>
-        <mesh position={[0,-.30,0]} scale={[.13,.34,.14]} castShadow><capsuleGeometry args={[.12,.34,10,20]}/><meshStandardMaterial color={avatar.bottomColor} roughness={.84}/></mesh>
-        <mesh position={[0,-.60,0]} scale={[.11,.11,.11]}><sphereGeometry args={[1,18,14]}/><meshStandardMaterial color={avatar.bottomColor}/></mesh>
-        <group ref={lowerRef} position={[0,-.60,0]}>
-          <mesh position={[0,-.28,0]} scale={[.095,.30,.10]} castShadow><capsuleGeometry args={[.09,.30,10,20]}/><meshStandardMaterial color={avatar.bottomColor} roughness={.84}/></mesh>
-          <mesh position={[0,-.56,.10]} scale={[.12,.075,.22]} castShadow><sphereGeometry args={[1,22,16]}/><meshStandardMaterial color={avatar.shoesColor} roughness={.68}/></mesh>
-        </group>
-      </group>;
-    })}
-
-    {avatar.accessory === 'mochila' && <mesh position={[0,1.5,-.31]} scale={[.30,.42,.13]} castShadow><sphereGeometry args={[1,22,16]}/><meshStandardMaterial color="#18251f" roughness={.9}/></mesh>}
+    {avatar.accessory === 'oculos' && <group position={[0,.055,.305]}>
+      {[-1,1].map((sg)=><mesh key={sg} position={[sg*.105,0,0]} scale={[1,.78,1]}><torusGeometry args={[.072,.012,8,24]}/><meshStandardMaterial color="#101214" roughness={.4} metalness={.18}/></mesh>)}
+      <mesh position={[0,0,0]}><boxGeometry args={[.07,.012,.012]}/><meshStandardMaterial color="#101214"/></mesh>
+      {[-1,1].map((sg)=><mesh key={`temple-${sg}`} position={[sg*.19,.005,-.035]} rotation={[0,sg*.22,0]}><boxGeometry args={[.15,.012,.012]}/><meshStandardMaterial color="#101214"/></mesh>)}
+    </group>}
+    {avatar.accessory === 'headset' && <group position={[0,.08,0]}>
+      <mesh rotation={[Math.PI/2,0,0]}><torusGeometry args={[.33,.027,8,28,Math.PI]}/><meshStandardMaterial color="#15191c" roughness={.45}/></mesh>
+      {[-1,1].map(sg=><mesh key={sg} position={[sg*.31,-.02,0]} scale={[.06,.11,.04]}><boxGeometry args={[1,1,1]}/><meshStandardMaterial color="#15191c"/></mesh>)}
+    </group>}
   </group>;
 }
 
+function Character3D({ avatar, state = 'IDLE', scale = 1 }: { avatar: Avatar; state?: MoveState; scale?: number }) {
+  const { scene, animations } = useGLTF('/models/human.glb');
+  const model = useMemo(() => prepareAvatarMesh(cloneSkeleton(scene)), [scene]);
+  const mixer = useMemo(() => new THREE.AnimationMixer(model), [model]);
+
+  const metrics = useMemo(() => {
+    model.updateMatrixWorld(true);
+    const box = new THREE.Box3().setFromObject(model);
+    const size = box.getSize(new THREE.Vector3());
+    const center = box.getCenter(new THREE.Vector3());
+    const targetHeight = 1.86;
+    return {
+      uniform: targetHeight / Math.max(.001, size.y),
+      offset: new THREE.Vector3(-center.x, -box.min.y, -center.z),
+    };
+  }, [model]);
+
+  const headBone = useMemo(() => model.getObjectByName('Head') as THREE.Bone | undefined, [model]);
+
+  useEffect(() => {
+    model.traverse((obj) => {
+      const mesh = obj as THREE.SkinnedMesh;
+      const mats = mesh.userData.avatarMaterials as THREE.MeshStandardMaterial[] | undefined;
+      if (!mats) return;
+      const skinTint = new THREE.Color(avatar.skin).lerp(new THREE.Color('#ffffff'), .36);
+      mats[0].color.copy(skinTint);
+      mats[1].color.set(avatar.topColor);
+      mats[2].color.set(avatar.bottomColor);
+      mats[3].color.set(avatar.shoesColor);
+      const premium = ['techwear-neon','cyber-hoodie','night-deploy','golden-ceo'].includes(avatar.top);
+      mats[1].emissive.set(premium ? avatar.topColor : '#000000');
+      mats[1].emissiveIntensity = premium ? .12 : 0;
+      mats.forEach(m => { m.needsUpdate = true; });
+    });
+    if (headBone) {
+      const sx = avatar.faceShape === 'soft' ? 1.04 : avatar.faceShape === 'angular' ? .96 : 1;
+      const sy = avatar.faceShape === 'oval' ? 1.05 : 1;
+      headBone.scale.set(sx, sy, 1);
+    }
+  }, [avatar.skin, avatar.topColor, avatar.bottomColor, avatar.shoesColor, avatar.top, avatar.faceShape, model, headBone]);
+
+  useEffect(() => {
+    const wanted = state === 'RUN' ? 'run' : state === 'WALK' ? 'walk' : 'idle';
+    const clip = animations.find((a) => a.name.toLowerCase().includes(wanted));
+    if (!clip) return;
+    const action = mixer.clipAction(clip);
+    action.reset().setEffectiveWeight(1).setEffectiveTimeScale(state === 'RUN' ? 1.05 : 1).fadeIn(.18).play();
+    return () => { action.fadeOut(.18); };
+  }, [animations, mixer, state]);
+
+  useEffect(() => () => { mixer.stopAllAction(); }, [mixer]);
+  useFrame((_, dt) => mixer.update(Math.min(dt, .05)));
+
+  const bodyX = avatar.bodyType === 'broad' ? 1.08 : avatar.bodyType === 'slim' ? .93 : 1;
+  const bodyZ = avatar.bodyType === 'broad' ? 1.05 : avatar.bodyType === 'slim' ? .96 : 1;
+
+  return <group scale={scale}>
+    <group scale={[metrics.uniform * bodyX, metrics.uniform, metrics.uniform * bodyZ]}>
+      <primitive object={model} position={metrics.offset}/>
+      {headBone ? createPortal(<HeadStyle avatar={avatar}/>, headBone) : null}
+    </group>
+  </group>;
+}
+
+useGLTF.preload('/models/human.glb');
+
 function Preview3D({ avatar }: { avatar: Avatar }) {
   return <div className="preview3d">
-    <Canvas camera={{ position:[0,1.05,4.25], fov:36 }} shadows dpr={[1,1.6]} gl={{ antialias:true }}>
+    <Canvas camera={{ position:[0,.20,3.25], fov:34 }} shadows dpr={[1,1.6]} gl={{ antialias:true, powerPreference:'high-performance' }}>
       <color attach="background" args={['#07100d']}/>
-      <ambientLight intensity={1.55}/>
-      <directionalLight position={[3,5,4]} intensity={2.2} castShadow/>
-      <directionalLight position={[-3,3,2]} intensity={.7}/>
-      <pointLight position={[-3,2,2]} color="#22d3ee" intensity={3.5}/>
-      <group position={[0,-.72,0]}><Character3D avatar={avatar} scale={.84}/></group>
-      <mesh rotation={[-Math.PI/2,0,0]} position={[0,-1.50,0]} receiveShadow><circleGeometry args={[1.15,64]}/><meshStandardMaterial color="#0a1711" roughness={1}/></mesh>
-      <OrbitControls target={[0,.18,0]} enablePan={false} minDistance={3.2} maxDistance={5.4} minPolarAngle={Math.PI*.28} maxPolarAngle={Math.PI*.70} rotateSpeed={.65} zoomSpeed={.7}/>
+      <ambientLight intensity={1.65}/>
+      <directionalLight position={[3,5,4]} intensity={2.1} castShadow/>
+      <directionalLight position={[-3,3,2]} intensity={.75}/>
+      <pointLight position={[-3,2,2]} color="#22d3ee" intensity={3}/>
+      <Suspense fallback={null}>
+        <group position={[0,-.92,0]}><Character3D avatar={avatar}/></group>
+      </Suspense>
+      <mesh rotation={[-Math.PI/2,0,0]} position={[0,-.93,0]} receiveShadow><circleGeometry args={[1.05,64]}/><meshStandardMaterial color="#0a1711" roughness={.95}/></mesh>
+      <OrbitControls makeDefault target={[0,0,0]} enablePan={false} minDistance={2.35} maxDistance={4.6} minPolarAngle={Math.PI*.28} maxPolarAngle={Math.PI*.68} rotateSpeed={.72}/>
     </Canvas>
-    <div className="preview-hint">arraste para girar · scroll/pinça para zoom</div>
+    <div className="preview-hint">↔ arraste para girar · scroll/pinça para zoom</div>
   </div>;
 }
 
