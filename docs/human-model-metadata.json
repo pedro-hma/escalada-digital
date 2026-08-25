@@ -1,0 +1,79 @@
+{
+  "asset": {
+    "generator": "FBX2glTF v0.9.7",
+    "version": "2.0"
+  },
+  "scene": 0,
+  "materials": [
+    "Texture"
+  ],
+  "meshes": [
+    "Human_Mesh"
+  ],
+  "nodes": [
+    "RootNode",
+    "Human Armature",
+    "Hips",
+    "Spine",
+    "Spine1",
+    "Spine2",
+    "Neck",
+    "Head",
+    "HeadTop_End",
+    "HeadTop_End_end",
+    "LeftShoulder",
+    "LeftArm",
+    "LeftForeArm",
+    "LeftHand",
+    "LeftHandThumb1",
+    "LeftHandThumb2",
+    "LeftHandThumb3",
+    "LeftHandThumb4",
+    "LeftHandThumb4_end",
+    "LeftHandIndex1",
+    "LeftHandIndex2",
+    "LeftHandIndex3",
+    "LeftHandIndex4",
+    "LeftHandIndex4_end",
+    "RightShoulder",
+    "RightArm",
+    "RightForeArm",
+    "RightHand",
+    "RightHandThumb1",
+    "RightHandThumb2",
+    "RightHandThumb3",
+    "RightHandThumb4",
+    "RightHandThumb4_end",
+    "RightHandIndex1",
+    "RightHandIndex2",
+    "RightHandIndex3",
+    "RightHandIndex4",
+    "RightHandIndex4_end",
+    "LeftUpLeg",
+    "LeftLeg",
+    "LeftFoot",
+    "LeftToeBase",
+    "LeftToe_End",
+    "LeftToe_End_end",
+    "RightUpLeg",
+    "RightLeg",
+    "RightFoot",
+    "RightToeBase",
+    "RightToe_End",
+    "RightToe_End_end",
+    "Human_Mesh"
+  ],
+  "animations": [
+    "Human Armature|ArmatureAction.002",
+    "Human Armature|Death",
+    "Human Armature|Idle",
+    "Human Armature|Jump",
+    "Human Armature|Punch",
+    "Human Armature|Run",
+    "Human Armature|Walk",
+    "Human Armature|Working"
+  ],
+  "skins": [
+    ""
+  ]
+}
