@@ -1,0 +1,20 @@
+Archive:  .tmp/kenney.zip
+  Length      Date    Time    Name
+---------  ---------- -----   ----
+        0  2022-09-12 22:06   Model/
+   167212  2019-11-01 15:25   Model/characterMedium.fbx
+        0  2022-09-12 22:27   Skins/
+    33627  2022-09-12 22:27   Skins/humanFemaleA.png
+    35497  2022-09-12 22:27   Skins/humanMaleA.png
+    34589  2022-09-12 22:27   Skins/zombieFemaleA.png
+    40176  2022-09-12 22:27   Skins/zombieMaleA.png
+      688  2023-09-16 13:04   License.txt
+   213490  2022-09-12 22:25   Preview.png
+       45  2018-11-29 09:37   Visit Kenney.url
+       55  2018-11-29 09:37   Visit Patreon.url
+        0  2022-09-12 22:06   Animations/
+   608188  2019-11-01 15:54   Animations/idle.fbx
+   562796  2020-01-12 17:40   Animations/jump.fbx
+   572732  2020-01-12 17:40   Animations/run.fbx
+---------                     -------
+  2269095                     15 files
