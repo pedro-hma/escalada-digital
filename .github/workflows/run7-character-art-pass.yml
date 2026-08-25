@@ -1,0 +1,30 @@
+name: Run 7 character art pass
+
+on:
+  push:
+    paths:
+      - '.github/workflows/run7-character-art-pass.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - name: Apply Run 7 art pass
+        run: python scripts/apply_run7.py
+      - name: Validate production build
+        run: |
+          npm install
+          npm run build
+      - name: Commit Run 7
+        run: |
+          git config user.name "escalada-digital-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add src/App.tsx package-lock.json
+          git commit -m "feat: Run 7 character art pass"
+          git push origin main
