@@ -17,6 +17,16 @@ jobs:
           ref: main
       - name: Apply avatar rework
         run: python scripts/apply_run6.py
+      - name: Fix Three r179 typings
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('src/App.tsx')
+          s=p.read_text()
+          s=s.replace("    materials.forEach((m) => { m.skinning = true; });\n", "")
+          s=s.replace("  useEffect(() => () => mixer.stopAllAction(), [mixer]);", "  useEffect(() => () => { mixer.stopAllAction(); }, [mixer]);")
+          p.write_text(s)
+          PY
       - name: Validate production build
         run: |
           npm install
