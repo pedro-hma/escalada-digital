@@ -188,7 +188,7 @@ function Character3D({ avatar, state = 'IDLE', scale = 1 }: { avatar: Avatar; st
 }
 
 function Preview3D({ avatar }: { avatar: Avatar }) {
-  return <div className="preview3d"><Canvas camera={{ position:[0,.55,3.7], fov:36 }} shadows><ambientLight intensity={1.2}/><directionalLight position={[3,5,4]} intensity={2} castShadow/><pointLight position={[-3,2,2]} color="#22d3ee" intensity={5}/><group position={[0,-.45,0]}><Character3D avatar={avatar} scale={.9}/></group><mesh rotation={[-Math.PI/2,0,0]} position={[0,-1.42,0]} receiveShadow><circleGeometry args={[1.2,48]}/><meshStandardMaterial color="#0a1711"/></mesh></Canvas></div>;
+  return <div className="preview3d"><Canvas camera={{ position:[0,1.15,4.4], fov:38 }} shadows><ambientLight intensity={1.2}/><directionalLight position={[3,5,4]} intensity={2} castShadow/><pointLight position={[-3,2,2]} color="#22d3ee" intensity={5}/><group position={[0,-.78,0]}><Character3D avatar={avatar} scale={.86}/></group><mesh rotation={[-Math.PI/2,0,0]} position={[0,-1.56,0]} receiveShadow><circleGeometry args={[1.2,48]}/><meshStandardMaterial color="#0a1711"/></mesh></Canvas></div>;
 }
 
 const WORLD = {
