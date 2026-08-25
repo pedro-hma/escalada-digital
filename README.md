@@ -36,7 +36,7 @@ O WORLD DEV LAB já contém a fundação jogável de locomoção:
 - painel de debug de posição, velocidade, rotação, zona e interação próxima
 
 ## Deploy
-O objetivo é manter `main` como a versão estável. Depois que o repositório estiver importado na Vercel, cada push em `main` gera um deploy automaticamente.
+`main` é a versão estável. O repositório está conectado à Vercel; cada push em `main` deve gerar um deploy automaticamente.
 
 ## Próximas etapas
 - migrar o criador completo de avatar e catálogo de roupas
