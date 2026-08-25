@@ -19,12 +19,12 @@ jobs:
         run: python scripts/apply_run6.py
       - name: Validate production build
         run: |
-          npm ci
+          npm install
           npm run build
       - name: Commit Run 6
         run: |
           git config user.name "escalada-digital-bot"
           git config user.email "actions@users.noreply.github.com"
-          git add src/App.tsx
+          git add src/App.tsx package-lock.json
           git commit -m "feat: Run 6 rigged human avatar rework"
           git push origin main
