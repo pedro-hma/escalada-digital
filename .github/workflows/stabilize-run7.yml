@@ -1,0 +1,30 @@
+name: Stabilize Run 7 avatar
+
+on:
+  push:
+    paths:
+      - '.github/workflows/stabilize-run7.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  stabilize:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - name: Apply stabilization patch
+        run: python scripts/stabilize_run7.py
+      - name: Validate build
+        run: |
+          npm install
+          npm run build
+      - name: Commit stabilized avatar
+        run: |
+          git config user.name "escalada-digital-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add src/App.tsx package-lock.json
+          git commit -m "fix: stabilize Run 7 avatar rendering"
+          git push origin main
