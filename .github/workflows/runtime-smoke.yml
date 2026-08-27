@@ -1,0 +1,32 @@
+name: Runtime smoke
+
+on:
+  push:
+    paths:
+      - 'tests/runtime-smoke.mjs'
+      - '.github/workflows/runtime-smoke.yml'
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install
+      - run: npm install --no-save playwright
+      - run: npx playwright install --with-deps chromium
+      - run: npm run build
+      - name: Start preview
+        run: |
+          npm run preview -- --host 127.0.0.1 > /tmp/escalada-preview.log 2>&1 &
+          echo $! > /tmp/escalada-preview.pid
+          for i in {1..30}; do curl -sSf http://127.0.0.1:4173 >/dev/null && break; sleep 1; done
+      - name: Browser smoke
+        run: node tests/runtime-smoke.mjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: runtime-smoke
+          path: runtime-smoke.png
